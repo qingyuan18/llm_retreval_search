@@ -5,6 +5,7 @@ from botocore.config import Config
 from langchain.document_loaders import TextLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.document_loaders import PyPDFLoader
+from langchain.document_loaders import Docx2txtLoader
 from langchain.memory import ConversationBufferMemory
 from langchain.agents.openai_functions_agent.base import OpenAIFunctionsAgent
 from langchain.schema.messages import SystemMessage
@@ -56,15 +57,17 @@ class FullContentRetriever(BaseRetriever):
     
     doc_type="txt"
     doc_path="./"
-    def _get_content_type(self,root_path:str):
+    def _get_content_type(doc_path:str):
         fullname=""
-        for root, dirs, files in os.walk(root_path):
+        for root, dirs, files in os.walk(path):
             for f in files:
-              fullname = os.path.join(root, f)
-              if "txt" in fullname:
-                    self.doc_type="txt"
-              if "pdf" in fullname:
-                    self.doc_type="pdf"
+                fullname = os.path.join(root, f)
+                if "txt" in fullname:
+                      self.doc_type="txt"
+                if "pdf" in fullname:
+                      self.doc_type="pdf"
+                if "doc" in fullname:
+                    self.doc_type="doc"
         self.doc_path = fullname
         
     
@@ -75,6 +78,10 @@ class FullContentRetriever(BaseRetriever):
         run_manager: CallbackManagerForRetrieverRun,
         **kwargs: Any,
     ) -> List[Document]:
+        if self.doc_type == "doc":
+            word_loader = Docx2txtLoader(self.doc_path)
+            word_document = word_loader.load()
+            return list(word_document)
         if self.doc_type == "txt":
             txt_loader = TextLoader(self.doc_path)
             txt_document = txt_loader.load()
@@ -85,6 +92,8 @@ class FullContentRetriever(BaseRetriever):
             return list(pdf_document)
         else:
             return []
+
+
 
 def get_bedrock_client(
     assumed_role: Optional[str] = None,

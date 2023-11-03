@@ -41,7 +41,6 @@ def generate_file(file_obj):
     print('上传文件的地址：{}'.format(file_obj.name)) # 输出上传后的文件在gradio中保存的绝对地址
 
     #获取到上传后的文件的绝对路径后，其余的操作就和平常一致了
-
     # 将文件复制到临时目录中
     shutil.copy(file_obj.name, tmpdir)
 
