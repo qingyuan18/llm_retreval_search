@@ -10,7 +10,7 @@ def update_df(df):
 
 def save_df(df):
     # 将DataFrame保存为json文件
-    df_json = df.to_json(orient='records')
+    df_json = df.to_json(orient='records',force_ascii=False)
     with open('role_template.json', 'w',encoding='utf-8') as f:
         json.dump(df_json, f,ensure_ascii=False)
     return df
