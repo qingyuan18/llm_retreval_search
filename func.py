@@ -1,99 +1,55 @@
-from typing import Optional
-import boto3
+import os
+import re
 import json
+import boto3
 from botocore.config import Config
+from langchain.llms.bedrock import Bedrock
+from langchain.callbacks.manager import CallbackManagerForLLMRun
+from langchain.agents import Tool, AgentExecutor, AgentOutputParser
+from langchain.schema import AgentAction, AgentFinish, OutputParserException
 from langchain.document_loaders import TextLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.document_loaders import PyPDFLoader
 from langchain.document_loaders import Docx2txtLoader
+from langchain.schema import BaseRetriever
+from langchain.callbacks.manager import CallbackManagerForRetrieverRun
+from langchain.schema import BaseRetriever, Document
+from typing import Any, Dict, List, Optional,Union
+from langchain.utilities import SerpAPIWrapper
+from langchain.tools.retriever import create_retriever_tool
+from langchain.tools import BaseTool, StructuredTool, Tool, tool
 from langchain.memory import ConversationBufferMemory
 from langchain.agents.openai_functions_agent.base import OpenAIFunctionsAgent
 from langchain.schema.messages import SystemMessage
 from langchain.prompts import (
     ChatPromptTemplate,
     PromptTemplate,
-    MessagesPlaceholder,
     SystemMessagePromptTemplate,
     AIMessagePromptTemplate,
     HumanMessagePromptTemplate,
 )
-from langchain.agents.agent_types import AgentType
-from typing import Optional, Type
-from langchain.callbacks.manager import (
-    AsyncCallbackManagerForToolRun,
-    CallbackManagerForToolRun,
-    CallbackManagerForChainRun
-)
-from langchain.llms.bedrock import Bedrock
-import os
-from langchain.agents.tools import Tool
-from typing import Optional, List, Any
-from langchain.callbacks.manager import CallbackManagerForLLMRun
 from langchain.memory import ConversationBufferWindowMemory
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.agents import initialize_agent
-from langchain.agents.agent_toolkits import create_retriever_tool
-from langchain.callbacks.manager import (
-    AsyncCallbackManagerForRetrieverRun,
-    CallbackManagerForRetrieverRun,
-)
-from langchain.retrievers.document_compressors.base import (
-    BaseDocumentCompressor,
-)
-from langchain.schema import BaseRetriever, Document
-from langchain.utilities import SerpAPIWrapper
-
-class BedrockModelWrapper(Bedrock):
-    def _call(
-        self,
-        prompt: str,
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> str:
-        prompt = "\nHuman: \n" + prompt + "\nAssistant:"   ## Satisfy Bedrock-Claude prompt requirements
-        return super()._call(prompt, stop, run_manager, **kwargs)
-
-class FullContentRetriever(BaseRetriever):
-    
-    doc_type="txt"
-    doc_path="./"
-    def _get_content_type(doc_path:str):
-        fullname=""
-        for root, dirs, files in os.walk(path):
-            for f in files:
-                fullname = os.path.join(root, f)
-                if "txt" in fullname:
-                      self.doc_type="txt"
-                if "pdf" in fullname:
-                      self.doc_type="pdf"
-                if "doc" in fullname:
-                    self.doc_type="doc"
-        self.doc_path = fullname
-        
-    
-    def _get_relevant_documents(
-        self,
-        query: str,
-        *,
-        run_manager: CallbackManagerForRetrieverRun,
-        **kwargs: Any,
-    ) -> List[Document]:
-        if self.doc_type == "doc":
-            word_loader = Docx2txtLoader(self.doc_path)
-            word_document = word_loader.load()
-            return list(word_document)
-        if self.doc_type == "txt":
-            txt_loader = TextLoader(self.doc_path)
-            txt_document = txt_loader.load()
-            return list(txt_document)        
-        elif self.doc_type == "pdf":
-            pdf_loader = PyPDFLoader(self.doc_path)
-            pdf_document = pdf_loader.load()
-            return list(pdf_document)
-        else:
-            return []
+from langchain.agents.agent_types import AgentType
 
 
+
+os.environ["SERPAPI_API_KEY"]="e94267b343a2985d25d7a9a65e1b31a6629a4b4860872c927b33c88674fa89d2"
+#role based initial client#######
+os.environ["AWS_DEFAULT_REGION"] = "us-west-2"  # E.g. "us-east-1"
+os.environ["AWS_PROFILE"] = "default"
+#os.environ["BEDROCK_ASSUME_ROLE"] = "arn:aws:iam::687912291502:role/service-role/AmazonSageMaker-ExecutionRole-20211013T113123"  # E.g. "arn:aws:..."
+
+
+parameters_bedrock = {
+    "max_tokens_to_sample": 2048,
+    #"temperature": 0.5,
+    "temperature": 0,
+    #"top_k": 250,
+    #"top_p": 1,
+    "stop_sequences": ["\n\nHuman"],
+}
 
 def get_bedrock_client(
     assumed_role: Optional[str] = None,
@@ -179,65 +135,157 @@ def get_bedrock_aksk(secret_name='chatbot_bedrock', region_name = "us-west-2"):
     secret = json.loads(get_secret_value_response['SecretString'])
     return secret['BEDROCK_ACCESS_KEY'],secret['BEDROCK_SECRET_KEY']
 
+class BedrockModelWrapper(Bedrock):
+    def _call(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> str:
+        prompt = "\nHuman: \n" + prompt + "\nAssistant:"   ## Satisfy Bedrock-Claude prompt requirements
+        return super()._call(prompt, stop, run_manager, **kwargs)
 
+
+class FullContentRetriever(BaseRetriever):
+    doc_path={}
+    def _get_content_type(self,doc_path:str):
+        fullname=""
+        for root, dirs, files in os.walk(doc_path):
+            for f in files:
+                fullname = os.path.join(root, f)
+                ext = os.path.splitext(fullname)[1]
+                self.doc_path[fullname]=ext
+        print(self.doc_path)        
+
+        
+    
+    def _get_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun,
+        **kwargs: Any,
+    ) -> List[Document]:
+        allDocs =[]
+        for key,value in self.doc_path.items():
+            #print("key:"+key+" value:"+value)
+            if value == ".doc":
+                word_loader = Docx2txtLoader(key)
+                word_document = word_loader.load()
+                allDocs.append(word_document)
+            elif value == ".txt":
+                txt_loader = TextLoader(key)
+                txt_document = txt_loader.load()
+                allDocs.append(txt_document)
+            elif value == ".pdf":
+                pdf_loader = PyPDFLoader(self.doc_path)
+                pdf_document = pdf_loader.load()
+                allDocs.append(pdf_document)
+            else:
+                pass
+        return allDocs
+
+
+##use customerized outputparse to fix claude not match 
+##langchain's openai ReAct template don't have 
+##final answer issue 
+class CustomOutputParser(AgentOutputParser):
+
+    def parse(self, llm_output: str) -> Union[AgentAction, AgentFinish]:
+        #print("cur step's llm_output ==="+llm_output)
+        # Check if agent should finish
+        if "Final Answer:" in llm_output:
+            return AgentFinish(
+                # Return values is generally always a dictionary with a single `output` key
+                # It is not recommended to try anything else at the moment :)
+                return_values={"output": llm_output.split("Final Answer:")[-1].strip()},
+                log=llm_output,
+            )
+        # Parse out the action and action input
+        regex = r"Action\s*\d*\s*:(.*?)\nAction\s*\d*\s*Input\s*\d*\s*:[\s]*(.*)"
+        match = re.search(regex, llm_output, re.DOTALL)
+        if not match:
+            return AgentFinish(
+                # Return values is generally always a dictionary with a single `output` key
+                # It is not recommended to try anything else at the moment :)
+                return_values={"output": llm_output},
+                log=llm_output,
+            )
+            #raise OutputParserException(f"Could not parse LLM output: `{llm_output}`")
+        action = match.group(1).strip()
+        action_input = match.group(2)
+        # Return the action and action input
+        return AgentAction(tool=action, tool_input=action_input.strip(" ").strip('"'), log=llm_output)
+
+
+
+       
+#### initial the tools&llm&momory ...etc #############
+retriever = FullContentRetriever()
+retriever._get_content_type("./docs")
 ACCESS_KEY, SECRET_KEY=get_bedrock_aksk()
-os.environ["AWS_DEFAULT_REGION"] = "us-west-2"  # E.g. "us-east-1"
-os.environ["AWS_PROFILE"] = "default"
 os.environ["AWS_ACCESS_KEY_ID"]=ACCESS_KEY
 os.environ["AWS_SECRET_ACCESS_KEY"]=SECRET_KEY
 
-
-#新boto3 sdk只能session方式初始化bedrock
-boto3_bedrock = get_bedrock_client(
-    #assumed_role=os.environ.get("BEDROCK_ASSUME_ROLE", None),
-    region=os.environ.get("AWS_DEFAULT_REGION", None)
-)
-
-parameters_bedrock = {
-    "max_tokens_to_sample": 2048,
-    #"temperature": 0.5,
-    "temperature": 0,
-    #"top_k": 250,
-    #"top_p": 1,
-    "stop_sequences": ["\n\nHuman"],
-}
-
-bedrock_llm = Bedrock(model_id="anthropic.claude-v2", client=boto3_bedrock, model_kwargs=parameters_bedrock)
-bedrock_llm_additional = BedrockModelWrapper(model_id="anthropic.claude-v2", 
-                                          client=boto3_bedrock, 
-                                          model_kwargs=parameters_bedrock)
-
-memory = ConversationBufferWindowMemory(k=2)
-system_message = SystemMessage(
-    content=(
-        "Do your best to answer the questions. "
-        "Feel free to use any tools available to look up "
-        "relevant information, only if necessary"
-    )
-)
-prompt = OpenAIFunctionsAgent.create_prompt(
-    system_message=system_message,
-    extra_prompt_messages=[MessagesPlaceholder(variable_name="chat_history")],
-)
-
-retriever = FullContentRetriever()
-retriever._get_content_type("./docs")
 retriever_tool = create_retriever_tool(
     retriever,
-    "search_enterprise_documents",
-    "useful for when you need to searches and returns documents regarding the user's question",
+    "search enterprise documents",
+    "useful for when you need to retreve documents regarding the user's question",
 )
 search = SerpAPIWrapper()
 search_tool = Tool(
-    name="Search",
+    name="search website",
     func=search.run,
     description="useful for when you need to answer questions by searching the website",
 )
 custom_tool_list = [retriever_tool,search_tool]
 
-agent_executor = initialize_agent(custom_tool_list, bedrock_llm_additional, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION, 
-                                  verbose=True,max_iterations=3,
+memory = ConversationBufferWindowMemory(k=2,memory_key="chat_history", input_key='input', output_key="output")
+#新boto3 sdk只能session方式初始化bedrock
+boto3_bedrock = get_bedrock_client(
+    #assumed_role=os.environ.get("BEDROCK_ASSUME_ROLE", None),
+    region=os.environ.get("AWS_DEFAULT_REGION", None)
+)
+bedrock_llm = Bedrock(model_id="anthropic.claude-v2", client=boto3_bedrock, model_kwargs=parameters_bedrock)    
+bedrock_llm_additional = BedrockModelWrapper(model_id="anthropic.claude-v2", 
+                                          client=boto3_bedrock, 
+                                          model_kwargs=parameters_bedrock)
+
+output_parser = CustomOutputParser()
+
+
+PREFIX = """Answer the following questions as best you can. You have access to the following tools:"""
+SUFFIX = """Begin!
+
+Question: {input}
+Thought:{agent_scratchpad}"""
+
+customerized_instructions="""
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+These are guidance on when to use a tool to solve a task, follow them strictly:
+ - first use "search enterprise documents" tool to retreve the document to answer if need
+ - then use "search website" tool to search the latest website to answer if need
+"""
+
+agent_executor = initialize_agent(custom_tool_list, bedrock_llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION, 
+                                  verbose=True,max_iterations=5,
                                   handle_parsing_errors=True,
                                   memory=memory,
-                                  return_intermediate_steps=True)
-agent_executor.agent.llm_chain.prompt.template=prompt
+                                  agent_kwargs={
+                                      "output_parser": output_parser,
+                                      #'prefix':PREFIX,
+                                      #'suffix':SUFFIX,
+                                      'format_instructions':customerized_instructions
+                                           }
+                                 )
