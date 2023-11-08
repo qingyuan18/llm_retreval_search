@@ -11,6 +11,7 @@ import re
 import tempfile
 import shutil
 from func import agent_executor
+from func import retriever
 
 DESCRIPTION = '''<h2 style='text-align: center'> 企业搜索问答demo </h2>'''
 default_chatbox = [("", "有什么可以帮您?")]
@@ -20,11 +21,11 @@ role_prompt_dict={}
 tmpdir="./"
 
 
-def find_index(array, value):
-  for i, v in enumerate(array):
-    if v == value:
-      return i
-  return -1
+#####authentication#########
+def auth_fn(user, password):
+    return user == 'admin' and password == 'admin123'
+
+
 
 #####initial role prompt template#####
 def initial_role_prompt(role_template_path:str):
@@ -41,15 +42,14 @@ def initial_role_prompt(role_template_path:str):
 
 ######gradio component func############
 def update_textbox(value):
-    global role_prompt_dict
-    print("value=="+value)
-    return value
+    return role_prompt_dict[value]
 
-def execute_agent(query:str,instruct:str):
+def execute_agent(query:str,instruct:str,chat_history):
     prompt = instruct + "\n" +query
-    reply =  agent_executor.run(prompt)
-    response = (reply, False)
-    return [response]
+    bot_msg =  agent_executor.run(prompt)
+    response = (query, bot_msg)
+    chat_history.append(response)
+    return "",chat_history
 
 
 def generate_file(file_obj):
@@ -65,22 +65,23 @@ def generate_file(file_obj):
 
     # 获取拷贝在临时目录的新的文件地址
     NewfilePath=os.path.join(tmpdir,FileName)
-    print(NewfilePath)
+    retriever._get_content_type(tmpdir)
+    return NewfilePath
 
     # 打开复制到新路径后的文件
-    with open(NewfilePath, 'rb') as file_obj:
+    #with open(NewfilePath, 'rb') as file_obj:
+    #    #在本地打开一个新的文件，并且将上传文件内容写入到新文件
+    #    outputPath=os.path.join("./docs/",FileName)
+    #    with open(outputPath,'wb') as w:
+    #        w.write(file_obj.read())
+    #return outputPath
 
-        #在本地打开一个新的文件，并且将上传文件内容写入到新文件
-        outputPath=os.path.join("./docs/",FileName)
-        with open(outputPath,'wb') as w:
-            w.write(file_obj.read())
 
-    # 返回新文件的的地址（注意这里）
-    return outputPath
 
 
 def clear_fn(value):
     return "", default_chatbox
+
 
 
 def main():
@@ -98,8 +99,6 @@ def main():
                             clear_button = gr.Button('清除')
                         with gr.Row():
                             doc_inputs = gr.components.File(label="上传文件")
-                        with gr.Row():
-                            doc_outputs = gr.components.File(label="下载文件",interactive=False,visible=False)
     
     
                 with gr.Column(scale=5.5):
@@ -110,14 +109,14 @@ def main():
     
             ###控件事件handler#####
             dropdown.change(fn=update_textbox, inputs=dropdown, outputs=instuct_text) 
-            run_button.click(fn=execute_agent,inputs=[input_text,instuct_text],outputs=[result_text])
-            input_text.submit(fn=execute_agent,inputs=[input_text],outputs=[result_text])
+            run_button.click(fn=execute_agent,inputs=[input_text,instuct_text,result_text],outputs=[input_text,result_text])
+            input_text.submit(fn=execute_agent,inputs=[input_text,instuct_text,result_text],outputs=[input_text,result_text])
             clear_button.click(fn=clear_fn, inputs=clear_button, outputs=[input_text, result_text])
-            doc_inputs.upload(fn=generate_file,inputs=[doc_inputs], outputs=[doc_outputs])
-            
+            doc_inputs.upload(fn=generate_file,inputs=[doc_inputs], outputs=[doc_inputs])
             print(gr.__version__)
     
         #demo.queue(concurrency_count=10)
+        #demo.launch(share=True,auth=auth_fn)
         demo.launch(share=True)
 
 

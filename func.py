@@ -223,7 +223,6 @@ class CustomOutputParser(AgentOutputParser):
        
 #### initial the tools&llm&momory ...etc #############
 retriever = FullContentRetriever()
-retriever._get_content_type("./docs")
 ACCESS_KEY, SECRET_KEY=get_bedrock_aksk()
 os.environ["AWS_ACCESS_KEY_ID"]=ACCESS_KEY
 os.environ["AWS_SECRET_ACCESS_KEY"]=SECRET_KEY
