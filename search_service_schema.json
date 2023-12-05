@@ -1,0 +1,47 @@
+{
+	"openapi": "3.0.0",
+	"info": {
+		"title": "search website API",
+		"description": "APIs for search website",
+		"version": "1.0.0"
+	},
+	"paths": {
+		"/searchWebsite": {
+			"post": {
+				"description": "search website",
+				"operationId": "searchWebsite",
+				"parameters": [{
+					"name": "user_query",
+					"in": "query",
+					"description": "user's query search",
+					"required": true,
+					"schema": {
+						"type": "string",
+						"default": ""
+					}
+				}],
+
+				"responses": {
+					"200": {
+						"description": "search website and return result",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"status": {
+											"type": "string"
+										},
+										"results": {
+											"type": "string"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
