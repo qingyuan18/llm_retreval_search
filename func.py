@@ -32,7 +32,15 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.agents import initialize_agent
 from langchain.agents.agent_types import AgentType
+from langchain.chains import RetrievalQA
 
+import logging
+
+from botocore.exceptions import ClientError
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 os.environ["SERPAPI_API_KEY"]="e94267b343a2985d25d7a9a65e1b31a6629a4b4860872c927b33c88674fa89d2"
@@ -51,12 +59,64 @@ parameters_bedrock = {
     "stop_sequences": ["\n\nHuman"],
 }
 
+
+
+
+def run_vqa_prompt(bedrock_runtime, input_image, input_text, max_tokens):
+    try:
+        model_id = 'anthropic.claude-3-sonnet-20240229-v1:0'
+        # Read reference image from file and encode as base64 strings.
+        with open(input_image, "rb") as image_file:
+            content_image = base64.b64encode(image_file.read()).decode('utf8')
+
+        message = {"role": "user",
+             "content": [
+                {"type": "image", "source": {"type": "base64",
+                "media_type": "image/jpeg", "data": content_image}},
+                {"type": "text", "text": input_text}
+                ]}
+
+
+        messages = [message]
+        body = json.dumps(
+        {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "messages": messages
+        }
+    )
+
+        response = bedrock_runtime.invoke_model(body=body, modelId=model_id)
+        response_body = json.loads(response.get('body').read())
+        return json.dumps(response_body, indent=4)['content'][0]['text']
+    except ClientError as err:
+        message = err.response["Error"]["Message"]
+        logger.error("A client error occurred: %s", message)
+        print("A client error occured: " +format(message))
+        return message
+
+
+
+def generate_claude3_message(bedrock_runtime, model_id, system_prompt, messages, max_tokens):
+    body=json.dumps(
+        {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "system": system_prompt,
+            "messages": messages
+        }
+    )
+    response = bedrock_runtime.invoke_model(body=body, modelId=model_id)
+    response_body = json.loads(response.get('body').read())
+    return response_body
+
+
 def get_bedrock_client(
     assumed_role: Optional[str] = None,
     region: Optional[str] = None,
     runtime: Optional[bool] = True,
 ):
-  
+
     if region is None:
         target_region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION"))
     else:
@@ -91,7 +151,7 @@ def get_bedrock_client(
         client_kwargs["aws_access_key_id"] = response["Credentials"]["AccessKeyId"]
         client_kwargs["aws_secret_access_key"] = response["Credentials"]["SecretAccessKey"]
         client_kwargs["aws_session_token"] = response["Credentials"]["SessionToken"]
-        
+
 
     if runtime:
         service_name='bedrock-runtime'
@@ -100,7 +160,7 @@ def get_bedrock_client(
 
     client_kwargs["aws_access_key_id"] = os.environ.get("AWS_ACCESS_KEY_ID","")
     client_kwargs["aws_secret_access_key"] = os.environ.get("AWS_SECRET_ACCESS_KEY","")
-    
+
     bedrock_client = session.client(
         service_name=service_name,
         config=retry_config,
@@ -149,6 +209,13 @@ class BedrockModelWrapper(Bedrock):
 
 class FullContentRetriever(BaseRetriever):
     doc_path={}
+
+    def _get_image_file(self,doc_path:str):
+        for key,value in self.doc_path.items():
+            if value == ".jpg" or value == ".png"
+               return key
+
+
     def _get_content_type(self,doc_path:str):
         fullname=""
         for root, dirs, files in os.walk(doc_path):
@@ -156,10 +223,15 @@ class FullContentRetriever(BaseRetriever):
                 fullname = os.path.join(root, f)
                 ext = os.path.splitext(fullname)[1]
                 self.doc_path[fullname]=ext
-        print(self.doc_path)        
+        print(self.doc_path)
+        if len(self.doc_path)==0:
+            return False
+        else:
+            return True
 
-        
-    
+    def _clear(self):
+        self.doc_path={}
+
     def _get_relevant_documents(
         self,
         query: str,
@@ -170,7 +242,7 @@ class FullContentRetriever(BaseRetriever):
         allDocs =[]
         for key,value in self.doc_path.items():
             #print("key:"+key+" value:"+value)
-            if value == ".doc":
+            if value == ".doc" or value == ".docx":
                 word_loader = Docx2txtLoader(key)
                 word_document = word_loader.load()
                 allDocs.append(word_document)
@@ -179,17 +251,19 @@ class FullContentRetriever(BaseRetriever):
                 txt_document = txt_loader.load()
                 allDocs.append(txt_document)
             elif value == ".pdf":
-                pdf_loader = PyPDFLoader(self.doc_path)
+                pdf_loader = PyPDFLoader(key)
                 pdf_document = pdf_loader.load()
                 allDocs.append(pdf_document)
             else:
                 pass
-        return allDocs
+        print("retrieved docs==")
+        print(allDocs[0])
+        return allDocs[0]
 
 
-##use customerized outputparse to fix claude not match 
-##langchain's openai ReAct template don't have 
-##final answer issue 
+##use customerized outputparse to fix claude not match
+##langchain's openai ReAct template don't have
+##final answer issue
 class CustomOutputParser(AgentOutputParser):
 
     def parse(self, llm_output: str) -> Union[AgentAction, AgentFinish]:
@@ -220,7 +294,7 @@ class CustomOutputParser(AgentOutputParser):
 
 
 
-       
+
 #### initial the tools&llm&momory ...etc #############
 retriever = FullContentRetriever()
 ACCESS_KEY, SECRET_KEY=get_bedrock_aksk()
@@ -246,9 +320,9 @@ boto3_bedrock = get_bedrock_client(
     #assumed_role=os.environ.get("BEDROCK_ASSUME_ROLE", None),
     region=os.environ.get("AWS_DEFAULT_REGION", None)
 )
-bedrock_llm = Bedrock(model_id="anthropic.claude-v2", client=boto3_bedrock, model_kwargs=parameters_bedrock)    
-bedrock_llm_additional = BedrockModelWrapper(model_id="anthropic.claude-v2", 
-                                          client=boto3_bedrock, 
+bedrock_llm = Bedrock(model_id="anthropic.claude-v2:1", client=boto3_bedrock, model_kwargs=parameters_bedrock)
+bedrock_llm_additional = BedrockModelWrapper(model_id="anthropic.claude-v2",
+                                          client=boto3_bedrock,
                                           model_kwargs=parameters_bedrock)
 
 output_parser = CustomOutputParser()
@@ -277,7 +351,7 @@ These are guidance on when to use a tool to solve a task, follow them strictly:
  - then use "search website" tool to search the latest website to answer if need
 """
 
-agent_executor = initialize_agent(custom_tool_list, bedrock_llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION, 
+agent_executor = initialize_agent(custom_tool_list, bedrock_llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
                                   verbose=True,max_iterations=5,
                                   handle_parsing_errors=True,
                                   memory=memory,
@@ -288,3 +362,5 @@ agent_executor = initialize_agent(custom_tool_list, bedrock_llm, agent=AgentType
                                       'format_instructions':customerized_instructions
                                            }
                                  )
+
+retrievalQA = RetrievalQA.from_llm(llm=bedrock_llm, retriever=retriever)

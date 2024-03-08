@@ -10,15 +10,43 @@ import time
 import re
 import tempfile
 import shutil
+import pandas as pd
 from func import agent_executor
+from func import bedrock_llm
 from func import retriever
+from func import retrievalQA
+from func import boto3_bedrock
 
+df = pd.read_json('./role_template.json',orient='records')
 DESCRIPTION = '''<h2 style='text-align: center'> 企业搜索问答demo </h2>'''
 default_chatbox = [("", "有什么可以帮您?")]
 role_keys = []
 role_values = []
 role_prompt_dict={}
 tmpdir="./"
+cur_role=""
+
+
+
+def delete_files_in_directory(directory):
+    file_names = os.listdir(directory)
+    for file_name in file_names:
+        file_path = os.path.join(directory, file_name)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+
+
+def update_df(table_data):
+    # 更新DataFrame
+    global df
+    df = table_data
+    return table_data
+
+def save_df(table_data):
+    global df
+    # 将DataFrame保存为json文件
+    df.to_json('./role_template.json',orient='records',force_ascii=False)
+    return df
 
 
 #####authentication#########
@@ -42,11 +70,24 @@ def initial_role_prompt(role_template_path:str):
 
 ######gradio component func############
 def update_textbox(value):
+    global cur_role
+    cur_role = value
     return role_prompt_dict[value]
 
 def execute_agent(query:str,instruct:str,chat_history):
     prompt = instruct + "\n" +query
-    bot_msg =  agent_executor.run(prompt)
+    bot_msg = ""
+    #bot_msg =  agent_executor.run(prompt)
+    files = os.listdir(tmpdir)
+    if cur_role == "图文对话":
+        input_image = retriever._get_image_file(tmpdir)
+        bot_msg = run_vqa_prompt(boto3_bedrock, input_image, prompt, 1000)
+    elif len(files)>0:
+        retriever._get_content_type(tmpdir)
+        print("doc found!")
+        bot_msg = retrievalQA.run(prompt)
+    else:
+        bot_msg = bedrock_llm.predict(prompt)
     response = (query, bot_msg)
     chat_history.append(response)
     return "",chat_history
@@ -80,6 +121,7 @@ def generate_file(file_obj):
 
 
 def clear_fn(value):
+    delete_files_in_directory(tmpdir)
     return "", default_chatbox
 
 
@@ -88,36 +130,43 @@ def main():
     gr.close_all()
     global tmpdir,role_keys
     with tempfile.TemporaryDirectory(dir='./tmp/') as tmpdir:
-        with gr.Blocks(css='style.css') as demo:   
-            gr.Markdown(DESCRIPTION)    
-            with gr.Row():
-                with gr.Column(scale=4.5):
-                    with gr.Group():
-                        input_text = gr.Textbox(label='Input Text', placeholder='Please enter text prompt below and press ENTER.')
-                        with gr.Row():
-                            run_button = gr.Button('提交')
-                            clear_button = gr.Button('清除')
-                        with gr.Row():
-                            doc_inputs = gr.components.File(label="上传文件")
-    
-    
-                with gr.Column(scale=5.5):
-                    result_text = gr.components.Chatbot(label='Multi-round conversation History', value=[("", "有什么可以帮您?")],height=550)
-            with gr.Row():
-                dropdown = gr.Dropdown(role_prompt_dict)
-                instuct_text = gr.Textbox(role_values[0],visible=False)
-    
+        with gr.Blocks(css='style.css') as demo:
+            with gr.Tab("main"):
+                gr.Markdown(DESCRIPTION)
+                with gr.Row():
+                    with gr.Column(scale=4.5):
+                        with gr.Group():
+                            input_text = gr.Textbox(label='你想问点什么？', placeholder='Please enter text prompt below and press ENTER.')
+                            with gr.Row():
+                                run_button = gr.Button('提交')
+                                clear_button = gr.Button('清除')
+                            with gr.Row():
+                                doc_inputs = gr.components.File(label="上传文件")
+
+
+                    with gr.Column(scale=5.5):
+                        result_text = gr.components.Chatbot(label='Multi-round conversation History', value=[("", "有什么可以帮您?")],height=550)
+                with gr.Row():
+                    dropdown = gr.Dropdown(role_prompt_dict,value="知识问答")
+                    instuct_text = gr.Textbox(role_values[0],visible=False)
+            with gr.Tab("role"):
+                data_table = gr.Dataframe(value=df, interactive=True)
+                save_button = gr.Button("Save")
+
             ###控件事件handler#####
-            dropdown.change(fn=update_textbox, inputs=dropdown, outputs=instuct_text) 
+            save_button.click(fn=save_df, inputs=[data_table], outputs=[data_table])
+            data_table.change(fn=update_df, inputs=[data_table], outputs=None)
+            dropdown.change(fn=update_textbox, inputs=dropdown, outputs=instuct_text)
             run_button.click(fn=execute_agent,inputs=[input_text,instuct_text,result_text],outputs=[input_text,result_text])
             input_text.submit(fn=execute_agent,inputs=[input_text,instuct_text,result_text],outputs=[input_text,result_text])
             clear_button.click(fn=clear_fn, inputs=clear_button, outputs=[input_text, result_text])
             doc_inputs.upload(fn=generate_file,inputs=[doc_inputs], outputs=[doc_inputs])
             print(gr.__version__)
-    
+
         #demo.queue(concurrency_count=10)
-        #demo.launch(share=True,auth=auth_fn)
-        demo.launch(share=True)
+        demo.launch(share=True,auth=auth_fn,server_name='0.0.0.0')
+        #demo.launch(share=True,server_name='0.0.0.0')
+        #demo.launch(share=True)
 
 
 if __name__ == '__main__':
