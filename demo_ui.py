@@ -75,6 +75,7 @@ def update_textbox(value):
     return role_prompt_dict[value]
 
 def execute_agent(query:str,instruct:str,chat_history):
+    global cur_role
     prompt = instruct + "\n" +query
     bot_msg = ""
     #bot_msg =  agent_executor.run(prompt)
