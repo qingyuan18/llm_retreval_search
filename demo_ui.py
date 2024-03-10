@@ -16,6 +16,7 @@ from func import bedrock_llm
 from func import retriever
 from func import retrievalQA
 from func import boto3_bedrock
+from func import run_vqa_prompt
 
 df = pd.read_json('./role_template.json',orient='records')
 DESCRIPTION = '''<h2 style='text-align: center'> 企业搜索问答demo </h2>'''
@@ -80,7 +81,7 @@ def execute_agent(query:str,instruct:str,chat_history):
     bot_msg = ""
     #bot_msg =  agent_executor.run(prompt)
     files = os.listdir(tmpdir)
-    if cur_role == "图文对话":
+    if  "图文问答" in cur_role :
         input_image = retriever._get_image_file(tmpdir)
         bot_msg = run_vqa_prompt(boto3_bedrock, input_image, prompt, 1000)
     elif len(files)>0:
@@ -123,7 +124,7 @@ def generate_file(file_obj):
 
 def clear_fn(value):
     delete_files_in_directory(tmpdir)
-    return "", default_chatbox
+    return "", default_chatbox,None
 
 
 
@@ -148,7 +149,7 @@ def main():
                     with gr.Column(scale=5.5):
                         result_text = gr.components.Chatbot(label='Multi-round conversation History', value=[("", "有什么可以帮您?")],height=550)
                 with gr.Row():
-                    dropdown = gr.Dropdown(role_prompt_dict,value="知识问答")
+                    dropdown = gr.Dropdown(role_prompt_dict,value="日语翻译")
                     instuct_text = gr.Textbox(role_values[0],visible=False)
             with gr.Tab("role"):
                 data_table = gr.Dataframe(value=df, interactive=True)
@@ -160,7 +161,7 @@ def main():
             dropdown.change(fn=update_textbox, inputs=dropdown, outputs=instuct_text)
             run_button.click(fn=execute_agent,inputs=[input_text,instuct_text,result_text],outputs=[input_text,result_text])
             input_text.submit(fn=execute_agent,inputs=[input_text,instuct_text,result_text],outputs=[input_text,result_text])
-            clear_button.click(fn=clear_fn, inputs=clear_button, outputs=[input_text, result_text])
+            clear_button.click(fn=clear_fn, inputs=clear_button, outputs=[input_text, result_text,doc_inputs])
             doc_inputs.upload(fn=generate_file,inputs=[doc_inputs], outputs=[doc_inputs])
             print(gr.__version__)
 

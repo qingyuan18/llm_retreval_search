@@ -2,6 +2,7 @@ import os
 import re
 import json
 import boto3
+import base64
 from botocore.config import Config
 from langchain.llms.bedrock import Bedrock
 from langchain.callbacks.manager import CallbackManagerForLLMRun
@@ -43,7 +44,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-os.environ["SERPAPI_API_KEY"]="e94267b343a2985d25d7a9a65e1b31a6629a4b4860872c927b33c88674fa89d2"
+os.environ["SERPAPI_API_KEY"]="e94267b343a2985d25d7a9a65e1b31a6629a4b4860872c927b33c88672"
 #role based initial client#######
 os.environ["AWS_DEFAULT_REGION"] = "us-west-2"  # E.g. "us-east-1"
 os.environ["AWS_PROFILE"] = "default"
@@ -88,7 +89,7 @@ def run_vqa_prompt(bedrock_runtime, input_image, input_text, max_tokens):
 
         response = bedrock_runtime.invoke_model(body=body, modelId=model_id)
         response_body = json.loads(response.get('body').read())
-        return json.dumps(response_body, indent=4)['content'][0]['text']
+        return response_body['content'][0]['text']
     except ClientError as err:
         message = err.response["Error"]["Message"]
         logger.error("A client error occurred: %s", message)
@@ -212,8 +213,9 @@ class FullContentRetriever(BaseRetriever):
 
     def _get_image_file(self,doc_path:str):
         for key,value in self.doc_path.items():
-            if value == ".jpg" or value == ".png"
+            if value == ".jpg" or value == ".png":
                return key
+        return None
 
 
     def _get_content_type(self,doc_path:str):
@@ -257,7 +259,7 @@ class FullContentRetriever(BaseRetriever):
             else:
                 pass
         print("retrieved docs==")
-        print(allDocs[0])
+        #print(allDocs[0])
         return allDocs[0]
 
 
