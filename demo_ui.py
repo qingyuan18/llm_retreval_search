@@ -11,12 +11,13 @@ import re
 import tempfile
 import shutil
 import pandas as pd
-from func import agent_executor
-from func import bedrock_llm
-from func import retriever
-from func import retrievalQA
-from func import boto3_bedrock
-from func import run_vqa_prompt
+from func_v2 import agent_executor
+from func_v2 import bedrock_llm
+from func_v2 import retriever
+from func_v2 import retrievalQA
+from func_v2 import chatModel
+from func_v2 import boto3_bedrock
+from func_v2 import run_vqa_prompt
 
 df = pd.read_json('./role_template.json',orient='records')
 DESCRIPTION = '''<h2 style='text-align: center'> 企业搜索问答demo </h2>'''
@@ -26,7 +27,9 @@ role_values = []
 role_prompt_dict={}
 tmpdir="./"
 cur_role=""
-
+model_id = None  # 新增全局变量用于存储模型 ID
+models_map = {"claude3-haidu":"anthropic.claude-3-haiku-20240307-v1:0",
+              "claude3-sonnet":"anthropic.claude-3-sonnet-20240229-v1:0"}
 
 
 def delete_files_in_directory(directory):
@@ -89,7 +92,8 @@ def execute_agent(query:str,instruct:str,chat_history):
         print("doc found!")
         bot_msg = retrievalQA.run(prompt)
     else:
-        bot_msg = bedrock_llm.predict(prompt)
+        #bot_msg = bedrock_llm.predict(prompt)
+        bot_msg = chatModel(prompt)
     response = (query, bot_msg)
     chat_history.append(response)
     return "",chat_history
@@ -126,6 +130,13 @@ def clear_fn(value):
     delete_files_in_directory(tmpdir)
     return "", default_chatbox,None
 
+def save_model_id(model_dropdown):
+    global model_id
+    model_id = models_map[model_dropdown]
+    print(f"Selected model ID: {model_id}")
+    chatModel = re_initial(model_id)
+    retrievalQA = RetrievalQA.from_llm(llm=chatModel, retriever=retriever)
+
 
 
 def main():
@@ -154,6 +165,13 @@ def main():
             with gr.Tab("role"):
                 data_table = gr.Dataframe(value=df, interactive=True)
                 save_button = gr.Button("Save")
+            with gr.Tab("model"):  # 新增一个 Tab
+                model_dropdown = gr.Dropdown(
+                    choices=["claude3-haidu", "claude3-sonnet"],
+                    value="claude3-haidu",
+                    label="Select Model"
+                )
+                save_model_button = gr.Button("Save Model")
 
             ###控件事件handler#####
             save_button.click(fn=save_df, inputs=[data_table], outputs=[data_table])
@@ -163,6 +181,7 @@ def main():
             input_text.submit(fn=execute_agent,inputs=[input_text,instuct_text,result_text],outputs=[input_text,result_text])
             clear_button.click(fn=clear_fn, inputs=clear_button, outputs=[input_text, result_text,doc_inputs])
             doc_inputs.upload(fn=generate_file,inputs=[doc_inputs], outputs=[doc_inputs])
+            save_model_button.click(fn=save_model_id, inputs=model_dropdown, outputs=None)
             print(gr.__version__)
 
         #demo.queue(concurrency_count=10)
