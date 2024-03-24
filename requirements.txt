@@ -1,0 +1,5 @@
+langchain-community
+langchain
+gradio
+google-search-results
+torch==2.1.1

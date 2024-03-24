@@ -5,6 +5,7 @@ import boto3
 import base64
 from botocore.config import Config
 from langchain.llms.bedrock import Bedrock
+from langchain_community.chat_models import BedrockChat
 from langchain.callbacks.manager import CallbackManagerForLLMRun
 from langchain.agents import Tool, AgentExecutor, AgentOutputParser
 from langchain.schema import AgentAction, AgentFinish, OutputParserException

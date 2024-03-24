@@ -11,6 +11,7 @@ import re
 import tempfile
 import shutil
 import pandas as pd
+from langchain_community.chat_models import BedrockChat
 from func_v2 import agent_executor
 from func_v2 import bedrock_llm
 from func_v2 import retriever
