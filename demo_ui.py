@@ -11,9 +11,9 @@ import re
 import tempfile
 import shutil
 import pandas as pd
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_community.chat_models import BedrockChat
-from func_v2 import agent_executor
-from func_v2 import bedrock_llm
+from func_v2 import re_initial
 from func_v2 import retriever
 from func_v2 import retrievalQA
 from func_v2 import chatModel
@@ -80,7 +80,7 @@ def update_textbox(value):
     return role_prompt_dict[value]
 
 def execute_agent(query:str,instruct:str,chat_history):
-    global cur_role
+    global cur_role,retriever
     prompt = instruct + "\n" +query
     bot_msg = ""
     #bot_msg =  agent_executor.run(prompt)
@@ -94,7 +94,12 @@ def execute_agent(query:str,instruct:str,chat_history):
         bot_msg = retrievalQA.run(prompt)
     else:
         #bot_msg = bedrock_llm.predict(prompt)
-        bot_msg = chatModel(prompt)
+        messages = [
+            HumanMessage(
+                content=prompt
+            )
+        ]
+        bot_msg = chatModel(messages).content
     response = (query, bot_msg)
     chat_history.append(response)
     return "",chat_history
@@ -132,11 +137,11 @@ def clear_fn(value):
     return "", default_chatbox,None
 
 def save_model_id(model_dropdown):
-    global model_id
+    global model_id,retrievalQA
     model_id = models_map[model_dropdown]
     print(f"Selected model ID: {model_id}")
     chatModel = re_initial(model_id)
-    retrievalQA = RetrievalQA.from_llm(llm=chatModel, retriever=retriever)
+    retrievalQA = retrievalQA.from_llm(llm=chatModel, retriever=retriever)
 
 
 
@@ -186,7 +191,7 @@ def main():
             print(gr.__version__)
 
         #demo.queue(concurrency_count=10)
-        demo.launch(share=True,auth=auth_fn,server_name='0.0.0.0')
+        demo.launch(share=True,auth=auth_fn,server_name='0.0.0.0',server_port=7861)
         #demo.launch(share=True,server_name='0.0.0.0')
         #demo.launch(share=True)
 

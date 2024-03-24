@@ -60,16 +60,17 @@ parameters_bedrock = {
     #"top_p": 1,
     "stop_sequences": ["\n\nHuman"]
 }
-
+chatModel=None
 
 def re_initial(model_id):
-   global parameters_bedrock;
+   global parameters_bedrock,chatModel
    chatModel = BedrockChat(
         model_id=model_id,
         streaming=True,
         callbacks=[StreamingStdOutCallbackHandler()],
         model_kwargs=parameters_bedrock,
-  )
+   )
+   return chatModel
 
 
 
@@ -376,5 +377,5 @@ agent_executor = initialize_agent(custom_tool_list, bedrock_llm, agent=AgentType
                                            }
                                  )
 
-chatModel = re_initial("anthropic.claude-3-haiku-20240307-v1:0")
+re_initial("anthropic.claude-3-haiku-20240307-v1:0")
 retrievalQA = RetrievalQA.from_llm(llm=chatModel, retriever=retriever)
