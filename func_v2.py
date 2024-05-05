@@ -225,7 +225,7 @@ class FullContentRetriever(BaseRetriever):
 
     def _get_image_file(self,doc_path:str):
         for key,value in self.doc_path.items():
-            if value == ".jpg" or value == ".png":
+            if value == ".jpg" or value == ".png" or value == ".jpeg":
                return key
         return None
 

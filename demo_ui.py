@@ -80,18 +80,24 @@ def update_textbox(value):
     return role_prompt_dict[value]
 
 def execute_agent(query:str,instruct:str,chat_history):
-    global cur_role,retriever
+    global cur_role,retriever,tmpdir
     prompt = instruct + "\n" +query
     bot_msg = ""
     #bot_msg =  agent_executor.run(prompt)
     files = os.listdir(tmpdir)
+
     if  "图文问答" in cur_role :
         input_image = retriever._get_image_file(tmpdir)
         bot_msg = run_vqa_prompt(boto3_bedrock, input_image, prompt, 1000)
     elif len(files)>0:
         retriever._get_content_type(tmpdir)
-        print("doc found!")
-        bot_msg = retrievalQA.run(prompt)
+        print("doc_path")
+        print(retriever.doc_path.values())
+        if any(ext in [".jpg",".jpeg",".png"] for ext in retriever.doc_path.values()):
+            bot_msg = "图像文件只能用于图文问答"
+        else:
+            print("doc found!")
+            bot_msg = retrievalQA.run(prompt)
     else:
         #bot_msg = bedrock_llm.predict(prompt)
         messages = [
@@ -133,7 +139,9 @@ def generate_file(file_obj):
 
 
 def clear_fn(value):
+    global retriever,tmpdir
     delete_files_in_directory(tmpdir)
+    retriever._clear()
     return "", default_chatbox,None
 
 def save_model_id(model_dropdown):
@@ -192,6 +200,7 @@ def main():
 
         #demo.queue(concurrency_count=10)
         demo.launch(share=True,auth=auth_fn,server_name='0.0.0.0',server_port=7861)
+        #demo.launch(share=True,server_name='0.0.0.0',server_port=7861)
         #demo.launch(share=True,server_name='0.0.0.0')
         #demo.launch(share=True)
 
